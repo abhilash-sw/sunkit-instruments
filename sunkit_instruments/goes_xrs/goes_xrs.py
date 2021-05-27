@@ -427,7 +427,7 @@ def _goes_chianti_tem(
         longflux_corrected = longflux
     # Un-scale fluxes if GOES satellite is after 7.  See 2nd paragraph
     # in Notes section of docstring above.
-    if satellite > 7:
+    if satellite > 7 and satellite <= 15:
         longflux_corrected = longflux_corrected / 0.7
         shortflux_corrected = shortflux / 0.85
     else:
