@@ -297,6 +297,7 @@ def _goes_chianti_tem(
     abundances="coronal",
     download=False,
     download_dir=None,
+    primary_chan=None,
 ):
     """
     Calculates temperature and emission measure from GOES/XRS data.
@@ -438,6 +439,7 @@ def _goes_chianti_tem(
         abundances=abundances,
         download=download,
         download_dir=download_dir,
+        primary_chan=primary_chan,
     )
     em = _goes_get_chianti_em(
         longflux_corrected,
@@ -446,6 +448,7 @@ def _goes_chianti_tem(
         abundances=abundances,
         download=download,
         download_dir=download_dir,
+        primary_chan=primary_chan,
     )
     return temp, em
 
