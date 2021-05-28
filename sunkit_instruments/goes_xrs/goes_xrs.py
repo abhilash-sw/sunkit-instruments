@@ -700,6 +700,7 @@ def _goes_get_chianti_em(
     abundances="coronal",
     download=False,
     download_dir=None,
+    primary_chan=None,
 ):
     """
     Calculates emission measure from GOES 1-8A flux and temperature.
@@ -804,6 +805,12 @@ def _goes_get_chianti_em(
         raise ValueError(
             "satellite must be the number of a " "valid GOES satellite (>1)."
         )
+
+    # check input arrays are of same length
+    if len(longflux) != len(temp):
+        raise ValueError("longflux and temp must have same number of " "elements.")
+
+
     # if abundance input is valid create file suffix, abund, equalling
     # of 'cor' or 'pho'.
     if abundances == "coronal":
@@ -814,45 +821,110 @@ def _goes_get_chianti_em(
         raise ValueError(
             "abundances must be a string equalling " "'coronal' or 'photospheric'."
         )
-    # check input arrays are of same length
-    if len(longflux) != len(temp):
-        raise ValueError("longflux and temp must have same number of " "elements.")
 
-    # Initialize lists to hold model data of temperature - long channel
-    # flux relationship read in from csv file.
-    modeltemp = []  # modelled temperature is in log_10 space in units of MK
-    modelflux = []
-    # Determine name of column in csv file containing model ratio values
-    # for relevant GOES satellite
-    label = f"longfluxGOES{satellite}"
+    if satellite > 15: #GOES-R satellites
+        # if abundance input is valid create file suffix, abund, equalling
+        # of 'cor' or 'pho'.
+        if abundances == "coronal":
+            data_file = get_test_filepath("goesr_chianti_em_cor.csv")
+        elif abundances == "photospheric":
+            data_file = get_test_filepath("goesr_chianti_em_pho.csv")
+        else:
+            raise ValueError(
+                "abundances must be a string equalling " "'coronal' or 'photospheric'."
+            )
 
-    # Read data representing appropriate temperature--long flux
-    # relationship depending on satellite number and assumed abundances.
-    with open(data_file) as csvfile:
-        startline = dropwhile(lambda l: l.startswith("#"), csvfile)
-        csvreader = csv.DictReader(startline, delimiter=";")
-        for row in csvreader:
-            modeltemp.append(float(row["log10temp_MK"]))
-            modelflux.append(float(row[label]))
-    modeltemp = np.asarray(modeltemp)
-    modelflux = np.asarray(modelflux)
+        # Initialize lists to hold model data of flux ratio - temperature
+        # relationship read in from csv file
+        modeltemp = []  # modelled temperature is in log_10 space in units of MK
+        modelflux1 = []
+        modelflux2 = []
+        # Determine name of column in csv file containing model ratio values
+        # for relevant GOES satellite
+        label1 = f"ratioGOES{satellite}_1"
+        label2 = f"ratioGOES{satellite}_2"
+        # Read data representing appropriate temperature--flux ratio
+        # relationship depending on satellite number and assumed abundances.
+        with open(data_file) as csvfile:
+            startline = dropwhile(lambda l: l.startswith("#"), csvfile)
+            csvreader = csv.DictReader(startline, delimiter=";")
+            for row in csvreader:
+                modeltemp.append(float(row["log10temp_MK"]))
+                modelflux1.append(float(row[label1]))
+                modelflux2.append(float(row[label2]))
+        modeltemp = np.asarray(modeltemp)
+        modelflux1 = np.asarray(modelflux1)        
+        modelflux2 = np.asarray(modelflux2)      
 
-    # Ensure input values of flux ratio are within limits of model table
-    if (
-        np.min(log10_temp) < np.min(modeltemp)
-        or np.max(log10_temp) > np.max(modeltemp)
-        or np.isnan(np.min(log10_temp))
-    ):
-        raise ValueError(
-            "All values in temp must be within the range "
-            "{} - {} MK.".format(np.min(10 ** modeltemp), np.max(10 ** modeltemp))
-        )
+        # If primary channel is not defined, assume low intensity channel
+        # as primary channel
+        if primary_chan is None:
+            primary_chan = np.ones(len(fluxratio))
 
-    # Perform spline fit to model data
-    spline = interpolate.splrep(modeltemp, modelflux, s=0)
-    denom = interpolate.splev(log10_temp, spline, der=0)
-    em = longflux.value / denom * 1e55
-    em = u.Quantity(em, unit="cm**(-3)")
+        # Ensure input values of flux ratio are within limits of model table
+        longflux1 = longflux[primary_chan==1]
+        longflux2 = longflux[primary_chan==2]
+
+        if (
+            np.min(log10_temp) < np.min(modeltemp)
+            or np.max(log10_temp) > np.max(modeltemp)
+            or np.isnan(np.min(log10_temp))
+        ):
+            raise ValueError(
+                "All values in temp must be within the range "
+                "{} - {} MK.".format(np.min(10 ** modeltemp), np.max(10 ** modeltemp))
+            )
+
+        # Perform spline fit to model data
+        spline1 = interpolate.splrep(modeltemp, modelflux1, s=0)
+        denom1 = interpolate.splev(log10_temp, spline1, der=0)
+        em1 = longflux1.value / denom1 * 1e55
+        spline2 = interpolate.splrep(modeltemp, modelflux2, s=0)
+        denom2 = interpolate.splev(log10_temp, spline2, der=0)
+        em2 = longflux2.value / denom2 * 1e55
+
+        em = np.zeros(len(longflux))
+        em[primary_chan==1] = em1
+        em[primary_chan==2] = em2
+        em = u.Quantity(em, unit="cm**(-3)")
+
+
+    elif satellite <= 15:
+        # Initialize lists to hold model data of temperature - long channel
+        # flux relationship read in from csv file.
+        modeltemp = []  # modelled temperature is in log_10 space in units of MK
+        modelflux = []
+        # Determine name of column in csv file containing model ratio values
+        # for relevant GOES satellite
+        label = f"longfluxGOES{satellite}"
+
+        # Read data representing appropriate temperature--long flux
+        # relationship depending on satellite number and assumed abundances.
+        with open(data_file) as csvfile:
+            startline = dropwhile(lambda l: l.startswith("#"), csvfile)
+            csvreader = csv.DictReader(startline, delimiter=";")
+            for row in csvreader:
+                modeltemp.append(float(row["log10temp_MK"]))
+                modelflux.append(float(row[label]))
+        modeltemp = np.asarray(modeltemp)
+        modelflux = np.asarray(modelflux)
+
+        # Ensure input values of flux ratio are within limits of model table
+        if (
+            np.min(log10_temp) < np.min(modeltemp)
+            or np.max(log10_temp) > np.max(modeltemp)
+            or np.isnan(np.min(log10_temp))
+        ):
+            raise ValueError(
+                "All values in temp must be within the range "
+                "{} - {} MK.".format(np.min(10 ** modeltemp), np.max(10 ** modeltemp))
+            )
+
+        # Perform spline fit to model data
+        spline = interpolate.splrep(modeltemp, modelflux, s=0)
+        denom = interpolate.splev(log10_temp, spline, der=0)
+        em = longflux.value / denom * 1e55
+        em = u.Quantity(em, unit="cm**(-3)")
 
     return em
 
