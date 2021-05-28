@@ -64,6 +64,7 @@ from sunpy.data import manager
 from sunpy.sun import constants
 from sunpy.time import parse_time
 from sunpy.util.config import get_and_create_download_dir
+from sunkit_instruments.data.test import get_test_filepath
 
 GOES_CONVERSION_DICT = {
     "X": u.Quantity(1e-4, "W/m^2"),
@@ -478,6 +479,7 @@ def _goes_get_chianti_temp(
     abundances="coronal",
     download=False,
     download_dir=None,
+    primary_chan=None,
 ):
     """
     Calculates temperature from GOES flux ratio.
@@ -570,49 +572,124 @@ def _goes_get_chianti_temp(
         raise ValueError(
             "satellite must be the number of a " "valid GOES satellite (>1)."
         )
-    # if abundance input is valid create file suffix, abund, equalling
-    # of 'cor' or 'pho'.
-    if abundances == "coronal":
-        data_file = manager.get("file_temp_cor")
-    elif abundances == "photospheric":
-        data_file = manager.get("file_temp_pho")
-    else:
-        raise ValueError(
-            "abundances must be a string equalling " "'coronal' or 'photospheric'."
-        )
-
-    # Initialize lists to hold model data of flux ratio - temperature
-    # relationship read in from csv file
-    modeltemp = []  # modelled temperature is in log_10 space in units of MK
-    modelratio = []
-    # Determine name of column in csv file containing model ratio values
-    # for relevant GOES satellite
-    label = f"ratioGOES{satellite}"
-    # Read data representing appropriate temperature--flux ratio
-    # relationship depending on satellite number and assumed abundances.
-    with open(data_file) as csvfile:
-        startline = dropwhile(lambda l: l.startswith("#"), csvfile)
-        csvreader = csv.DictReader(startline, delimiter=";")
-        for row in csvreader:
-            modeltemp.append(float(row["log10temp_MK"]))
-            modelratio.append(float(row[label]))
-    modeltemp = np.asarray(modeltemp)
-    modelratio = np.asarray(modelratio)
-
-    # Ensure input values of flux ratio are within limits of model table
-    if np.min(fluxratio) < np.min(modelratio) or np.max(fluxratio) > np.max(modelratio):
-        raise ValueError(
-            "For GOES {0}, all values in fluxratio input must be within "
-            + "the range {1} - {2}.".format(
-                satellite, np.min(modelratio), np.max(modelratio)
+    
+    if satellite > 15: #GOES-R satellites
+        # if abundance input is valid create file suffix, abund, equalling
+        # of 'cor' or 'pho'.
+        if abundances == "coronal":
+            data_file = get_test_filepath("goesr_chianti_temp_cor.csv")
+        elif abundances == "photospheric":
+            data_file = get_test_filepath("goesr_chianti_temp_pho.csv")
+        else:
+            raise ValueError(
+                "abundances must be a string equalling " "'coronal' or 'photospheric'."
             )
-        )
 
-    # Perform spline fit to model data to get temperatures for input
-    # values of flux ratio
-    spline = interpolate.splrep(modelratio, modeltemp, s=0)
-    temp = 10.0 ** interpolate.splev(fluxratio.value, spline, der=0)
-    temp = u.Quantity(temp, unit="MK")
+        # Initialize lists to hold model data of flux ratio - temperature
+        # relationship read in from csv file
+        modeltemp = []  # modelled temperature is in log_10 space in units of MK
+        modelratio1 = []
+        modelratio2 = []
+        # Determine name of column in csv file containing model ratio values
+        # for relevant GOES satellite
+        label1 = f"ratioGOES{satellite}_1"
+        label2 = f"ratioGOES{satellite}_2"
+        # Read data representing appropriate temperature--flux ratio
+        # relationship depending on satellite number and assumed abundances.
+        with open(data_file) as csvfile:
+            startline = dropwhile(lambda l: l.startswith("#"), csvfile)
+            csvreader = csv.DictReader(startline, delimiter=";")
+            for row in csvreader:
+                modeltemp.append(float(row["log10temp_MK"]))
+                modelratio1.append(float(row[label1]))
+                modelratio2.append(float(row[label2]))
+        modeltemp = np.asarray(modeltemp)
+        modelratio1 = np.asarray(modelratio1)        
+        modelratio2 = np.asarray(modelratio2)      
+
+        # If primary channel is not defined, assume low intensity channel
+        # as primary channel
+        if primary_chan is None:
+            primary_chan = np.ones(len(fluxratio))
+
+        # Ensure input values of flux ratio are within limits of model table
+        fluxratio1 = fluxratio[primary_chan==1]
+        fluxratio2 = fluxratio[primary_chan==2]
+
+        if np.min(fluxratio1) < np.min(modelratio1) or np.max(fluxratio1) > np.max(modelratio1):
+            raise ValueError(
+                "For GOES {0}, all values in fluxratio input must be within "
+                + "the range {1} - {2}.".format(
+                    satellite, np.min(modelratio1), np.max(modelratio1)
+                )
+            )
+
+        if np.min(fluxratio2) < np.min(modelratio2) or np.max(fluxratio2) > np.max(modelratio2):
+            raise ValueError(
+                "For GOES {0}, all values in fluxratio input must be within "
+                + "the range {1} - {2}.".format(
+                    satellite, np.min(modelratio2), np.max(modelratio2)
+                )
+            )
+
+        # Perform spline fit to model data to get temperatures for input
+        # values of flux ratio
+        spline1 = interpolate.splrep(modelratio1, modeltemp, s=0)
+        temp1 = 10.0 ** interpolate.splev(fluxratio1.value, spline1, der=0)
+        spline2 = interpolate.splrep(modelratio2, modeltemp, s=0)
+        temp2 = 10.0 ** interpolate.splev(fluxratio2.value, spline2, der=0)
+
+        temp = np.zeros(len(fluxratio))
+        temp[primary_chan==1] = temp1
+        temp[primary_chan==2] = temp2
+
+        temp = u.Quantity(temp, unit="MK")
+
+
+    elif satellite <= 15:
+        # if abundance input is valid create file suffix, abund, equalling
+        # of 'cor' or 'pho'.
+        if abundances == "coronal":
+            data_file = manager.get("file_temp_cor")
+        elif abundances == "photospheric":
+            data_file = manager.get("file_temp_pho")
+        else:
+            raise ValueError(
+                "abundances must be a string equalling " "'coronal' or 'photospheric'."
+            )
+
+        # Initialize lists to hold model data of flux ratio - temperature
+        # relationship read in from csv file
+        modeltemp = []  # modelled temperature is in log_10 space in units of MK
+        modelratio = []
+        # Determine name of column in csv file containing model ratio values
+        # for relevant GOES satellite
+        label = f"ratioGOES{satellite}"
+        # Read data representing appropriate temperature--flux ratio
+        # relationship depending on satellite number and assumed abundances.
+        with open(data_file) as csvfile:
+            startline = dropwhile(lambda l: l.startswith("#"), csvfile)
+            csvreader = csv.DictReader(startline, delimiter=";")
+            for row in csvreader:
+                modeltemp.append(float(row["log10temp_MK"]))
+                modelratio.append(float(row[label]))
+        modeltemp = np.asarray(modeltemp)
+        modelratio = np.asarray(modelratio)
+
+        # Ensure input values of flux ratio are within limits of model table
+        if np.min(fluxratio) < np.min(modelratio) or np.max(fluxratio) > np.max(modelratio):
+            raise ValueError(
+                "For GOES {0}, all values in fluxratio input must be within "
+                + "the range {1} - {2}.".format(
+                    satellite, np.min(modelratio), np.max(modelratio)
+                )
+            )
+
+        # Perform spline fit to model data to get temperatures for input
+        # values of flux ratio
+        spline = interpolate.splrep(modelratio, modeltemp, s=0)
+        temp = 10.0 ** interpolate.splev(fluxratio.value, spline, der=0)
+        temp = u.Quantity(temp, unit="MK")
 
     return temp
 
